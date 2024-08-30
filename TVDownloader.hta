@@ -1,0 +1,393 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD XHTML 1.1 Strict//EN"
+"http://www.w3.org/TR/xhtml11/DTD/xhtml11-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ru">
+<head>
+<meta http-equiv="Content-Type" content='text/html; charset="utf-8"'/>
+<meta name="Author" content='XPloRR'/>
+<Title>TVDownloader</Title>
+<!-- Created by XPloRR 24-08-2020-->
+<hta:application
+	id="oHTA"
+	applicationName="TVDownloader"
+	version="1.19e [2023-12-27]"
+	copyright="© Created by XPloRR 2020"
+	modString="Modified by: Ciber SLasH [2024-05-19]"
+
+	border="thick"
+	innerBorder="no"
+	caption="yes"
+	icon="TVDownloader.ico"
+	scroll="no"
+	showInTaskBar="yes"
+	singleInstance="yes"
+
+	sysMenu="yes"
+	maximizeButton="no"
+
+	windowState="normal"/>
+<style type="text/css">
+/*<![CDATA[*/
+body, html, table {
+	font-family: Microsoft Sans Serif,sans-serif;
+	font-size: 8pt;
+	background-color: buttonface;
+}
+input {
+	font-family: Microsoft Sans Serif,sans-serif;
+	font-size: 8pt;
+}
+img {cursor: hand;}
+.fl {float: left;}
+.disabled {background-color: Gainsboro;}
+.enabled {background-color: inherit;}
+/*]]>*/
+</style>
+<script language="VBScript">
+'<![CDATA[
+Const IS_DEBUG = 0
+Const UI_DPI = 96
+Const UI_Width  = 460
+Const UI_Height = 360
+Dim height_pixels, width_pixels
+Dim WMI_service, item, items
+
+Window.ResizeTo UI_Width, UI_Height
+Window.MoveTo (screen.width-UI_Width)/2, (screen.height-UI_Height)/2
+
+Set WMI_service = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+Set items = WMI_service.ExecQuery("Select PixelsPerXLogicalInch,PixelsPerYLogicalInch from Win32_DesktopMonitor")
+
+For Each item In items
+	pixels_per_logical_inch_height = item.PixelsPerYLogicalInch
+	pixels_per_logical_inch_width  = item.PixelsPerXLogicalInch
+Next
+
+width_pixels  = UI_Width / UI_DPI * pixels_per_logical_inch_width
+height_pixels = UI_Height / UI_DPI * pixels_per_logical_inch_height
+Window.ResizeTo width_pixels, height_pixels
+Window.MoveTo (screen.width-width_pixels)/2, (screen.height-height_pixels)/2
+
+' Global Variables and default value
+Dim gKey: gKey = "HKCU\Software\TVDownloader\"
+Dim gOutFolder: gOutFolder = "C:\Temp"
+Dim gQuality: gQuality = "Best"
+Dim gMetaData: gMetaData = False
+Dim gSubtitles: gSubtitles = False
+Dim gSubs: gSubs = "all"
+Dim oFSO: Set oFSO = CreateObject("Scripting.FileSystemObject")
+Dim oWSH: Set oWSH = CreateObject("WScript.Shell")
+
+Sub elemDis(elem, flag)
+	elem.disabled = flag
+	If flag Then
+		elem.className = "disabled"
+	Else
+		elem.className = "enabled"
+	End If
+End Sub
+
+Sub FreeObject
+	On Error Resume Next
+		Set oWSH = Nothing
+		Set oFSO = Nothing
+	On Error Goto 0
+End Sub
+
+Function CurDir()
+	strHtmlLocnVal = document.location.href
+	strThisHTA = Replace(Right(strHtmlLocnVal, Len(strHtmlLocnVal) - 8), "/", "\")
+	strThisHTA = UnEscape(strThisHTA)
+	Set objThisFile = oFSO.GetFile(strThisHTA)
+	objParentDir = objThisFile.ParentFolder
+	Set objFolder = oFSO.GetFolder(objParentDir)
+	CurDir = objFolder.Path
+End Function
+
+' If "youtube." OR "youtu.be": remove additional url parameters
+Function CheckYoutubeUrl(url)
+Dim sRet: sRet = url
+	If (InStr(1, url, "youtube.", 1) > 0) or (InStr(1, url, "youtu.be", 1) > 0) Then
+		Dim i: i = Instr(1, url, "&", 1)
+		If i > 0 Then
+			sRet = Left(url, i-1)
+		End If
+	End If
+CheckYoutubeUrl = sRet
+End Function
+
+'--[ Clipboard ]----------------------------------------------------------------
+	Sub fromClipboard(obj)
+		obj.value = Document.parentWindow.clipboardData.GetData("text")
+	End Sub
+'--[ HTA_KeyPress ]-------------------------------------------------------------
+	Sub HTA_KeyPress
+		Dim e: Set e = Me.parentWindow.event
+		' <ESC> OR <Alt+F4>
+		If (e.keyCode = 27) or ( Me.parentWindow.event.altKey and (Me.parentWindow.event.keyCode = 115) ) Then
+			RegWriteParams()
+			FreeObject()
+			Window.close()
+		End If
+	End Sub
+'--[ Registry ]-----------------------------------------------------------------
+	Sub RegReadParams
+		With oWSH
+			gOutFolder = .ExpandEnvironmentStrings( _
+				.RegRead(gKey & "OutFolder") _
+			)
+			gQuality = .RegRead(gKey & "Quality")
+			gMetaData = CBool(.RegRead(gKey & "MetaData"))
+			gSubtitles = CBool(.RegRead(gKey & "Subtitles"))
+			gSubs = .RegRead(gKey & "Subs")
+		End With
+	End Sub
+
+	Sub RegWriteParams
+		With oWSH
+			.RegWrite gKey & "OutFolder", userselections.OutFolder.value
+			For Each objButton in userselections.Quality
+				If objButton.Checked Then
+					gQuality = objButton.Value
+				End If
+			Next
+			.RegWrite gKey & "Quality", gQuality
+			.RegWrite gKey & "MetaData", userselections.MetaData.checked
+			.RegWrite gKey & "Subtitles", userselections.Subtitles.checked
+			.RegWrite gKey & "Subs", userselections.Subs.value
+		End With
+	End Sub
+'--[ Window: Load/unLoad ]------------------------------------------------------
+	Sub Window_OnLoad
+		On Error Resume Next
+			oWSH.RegRead(gKey)
+			' If gKey not exist
+			If Err.Number <> 0 Then
+				With oWSH
+					gOutFolder = .ExpandEnvironmentStrings( _
+						.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders\{374DE290-123F-4565-9164-39C4925E467B}") _
+					)
+				End With
+			Else
+				RegReadParams()
+			End If
+		On Error Goto 0
+
+		userselections.OutFolder.value = gOutFolder
+		For Each objButton in userselections.Quality
+			If objButton.Value = gQuality Then
+				objButton.Checked = True
+			End If
+		Next
+		userselections.MetaData.checked = gMetaData
+		userselections.Subtitles.checked = gSubtitles
+		userselections.Subs.value = gSubs
+		Call elemDis(userselections.Subs, Not (userselections.Subtitles.checked))
+
+		Document.OnKeyDown = GetRef("HTA_KeyPress")
+	End Sub
+
+	Sub Window_onUnload
+		RegWriteParams()
+		FreeObject()
+		Window.close()
+	End Sub
+'--[ Button handlers ]----------------------------------------------------------
+	Sub ChooseSaveFolder
+		strStartDir = ""
+		Folder = PickFolder(strStartDir)
+		If Folder <> "" Then
+			userselections.OutFolder.value = Folder
+		End If
+	End Sub
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+	Function PickFolder(strStartDir)
+		Dim SA, F
+		Set SA = CreateObject("Shell.Application")
+		Set F = SA.BrowseForFolder(0, "Choose a folder", 0, strStartDir)
+		If (Not F Is Nothing) Then
+			PickFolder = F.Items.Item.path
+		End If
+		Set F = Nothing
+		Set SA = Nothing
+	End Function
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+	Sub DownloadVideo
+		VideoURL = CheckYoutubeUrl(userselections.VideoURL.value)
+		UserName = userselections.UserName.value
+		Password = userselections.Password.value
+
+		For Each objButton in userselections.Quality
+			If objButton.Checked Then
+				Quality = objButton.Value
+			End If
+		Next
+
+		Select Case Quality
+			Case "Best"		Format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
+			' 2160p: 3840x2160
+			Case "2160p"	Format = "bestvideo[width=3840][ext=mp4]+bestaudio[ext=m4a]/bestvideo[width=3840]+bestaudio"
+			' 1440p: 2560x1440
+			Case "1440p"	Format = "bestvideo[width=2560][ext=mp4]+bestaudio[ext=m4a]/bestvideo[width=2560]+bestaudio"
+			' 1080p: 1920x1080
+			Case "1080p"	Format = "bestvideo[width=1920][ext=mp4]+bestaudio[ext=m4a]/bestvideo[width=1920]+bestaudio"
+			' 720p: 1280x720
+			Case "720p"		Format = "bestvideo[width=1280][ext=mp4]+bestaudio[ext=m4a]/bestvideo[width=1280]+bestaudio"
+			' 480p: 854x480
+			Case "480p"		Format = "bestvideo[width=854][ext=mp4]+bestaudio[ext=m4a]/bestvideo[width=854]+bestaudio"
+			' 360p: 640x360
+			Case "360p"		Format = "bestvideo[width=640][ext=mp4]+bestaudio[ext=m4a]/bestvideo[width=640]+bestaudio"
+			Case "Worst"	Format = "worstvideo[ext=mp4]+worstaudio[ext=m4a]/worst[ext=mp4]/worst"
+		End Select
+
+		If VideoURL = "" Then
+			msgbox "Please Enter a Video Source URL"
+			Exit Sub
+		End If
+
+		OutFolder = userselections.OutFolder.value
+		If OutFolder = "" Then
+			msgbox "Please Enter an Output Folder"
+			Exit Sub
+		End If
+
+		If NOT (oFSO.FolderExists(OutFolder)) Then
+			msgbox "Output Folder Does Not Exist"
+			Exit Sub
+		End If
+
+		RunParams = "yt-dlp.exe --console-title --no-check-certificates --no-break-on-existing --force-overwrites"
+
+		If UserName <> "" Then
+			RunParams = RunParams & " -u " & UserName & " -p " & Password
+		End If
+
+		If userselections.MetaData.checked = True Then
+			RunParams = RunParams & " --add-metadata"
+		End If
+
+		If userselections.Subtitles.checked = True Then
+			RunParams = RunParams & " --sub-langs " & userselections.Subs.value & " --write-auto-subs --convert-subs srt"
+		End If
+
+		RunParams = RunParams & " -f """ & Format & """ -o """ & OutFolder & "\%(title)s.%(ext)s"" """ & VideoURL & """ & pause"
+
+		If IS_DEBUG Then
+			'msgbox RunParams
+			oWSH.Run "%comspec% /C echo " & RunParams
+			FreeObject()
+			Window.close()
+		Else
+			oWSH.Run "%comspec% /C """ & RunParams & """", 1, False
+		End If
+	End Sub
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+	Sub DownloadAudio
+		Dim FSO
+		VideoURL = CheckYoutubeUrl(userselections.VideoURL.value)
+		UserName = userselections.UserName.value
+		Password = userselections.Password.value
+
+		For Each objButton in userselections.Quality
+			If objButton.Checked Then
+				Quality = objButton.Value
+			End If
+		Next
+
+		If VideoURL = "" Then
+			msgbox "Please Enter a Video Source URL"
+			Exit Sub
+		End If
+
+		OutFolder = userselections.OutFolder.value
+		If OutFolder = "" Then
+			msgbox "Please Enter an Output Folder"
+			Exit Sub
+		End If
+
+		If NOT (oFSO.FolderExists(OutFolder)) Then
+			msgbox "Output Folder Does Not Exist"
+			Exit Sub
+		End If
+
+		RunParams = "yt-dlp.exe --console-title --no-check-certificate"
+
+		If UserName <> "" Then
+			RunParams = RunParams & " -u " & UserName & " -p " & Password
+		End If
+
+		If userselections.MetaData.checked = True Then
+			RunParams = RunParams & " --add-metadata --embed-thumbnail"
+		End If
+
+		If Quality = "Worst" Then
+			RunParams = RunParams & " -f worstaudio/worst -x --audio-quality 9 --audio-format mp3 -o """ & OutFolder & "/%(title)s.%(ext)s"" """ & VideoURL & """ &pause"
+		Else
+			RunParams = RunParams & " -f bestaudio/best -x --audio-quality 1 --audio-format mp3 -o """ & OutFolder & "/%(title)s.%(ext)s"" """ & VideoURL & """ &pause"
+		End If
+
+		oWSH.Run "%comspec% /c """ & RunParams & """", 1, False
+	End Sub
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+	Function OpenUrl(url)
+		oWSH.Run(url)
+		window.event.returnValue = False
+	End Function
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+	Sub About
+		Dim ft: ft = "dialogWidth: 350px; dialogHeight: 150px; center: yes; help: no; resizable: no; status: no"
+		window.showModalDialog "./about.htm", window, ft
+	End Sub
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+	Sub UpdateYtDlp()
+		Dim RunParams
+		RunParams = "yt-dlp.exe -U & pause"
+
+		If IS_DEBUG Then
+			'msgbox RunParams
+			oWSH.Run "%comspec% /C echo " & RunParams
+			FreeObject()
+			Window.close()
+		Else
+			oWSH.Run "%comspec% /C """ & RunParams & """", 1, False
+		End If
+	End Sub
+	' ]]>
+</script>
+</head>
+
+<body>
+<form name="userselections">
+	Video Source URL (Youtube, Vimeo, DailyMotion, BBC, +900 more)<br>
+	<input type="text" name="VideoURL" size="72"/><input type="button" onClick='fromClipboard(userselections.VideoURL)' value="Paste"/>
+	<table>
+	<tr><td align="right">Login or E-Mail</td><td><input type="text" name="UserName" size="30"/></td><td>if needed for the Video-site above</td></tr>
+	<tr><td align="right">Password</td><td><input type="password" name="Password" size="30"/></td><td></td></tr>
+	</table>
+	Output Folder<br/>
+	<input type="text" name="OutFolder" size="76"/><input type="button" onClick="ChooseSaveFolder" value="..."/>
+	<br/>
+	Video Resolution<br/>
+	<input type="radio" name="Quality" id='Quality_Best' value="Best" checked="true"/><label for='Quality_Best'>Best</label>
+	<input type="radio" name="Quality" id='Quality_2160p' value="2160p"/><label for='Quality_2160p'>2160p</label>
+	<input type="radio" name="Quality" id='Quality_1440p' value="1440p"/><label for='Quality_1440p'>1440p</label>
+	<input type="radio" name="Quality" id='Quality_1080p' value="1080p"/><label for='Quality_1080p'>1080p</label>
+	<input type="radio" name="Quality" id='Quality_720p' value="720p"/><label for='Quality_720p'>720p</label>
+	<input type="radio" name="Quality" id='Quality_480p' value="480p"/><label for='Quality_480p'>480p</label>
+	<input type="radio" name="Quality" id='Quality_360p' value="360p"/><label for='Quality_360p'>360p</label>
+	<input type="radio" name="Quality" id='Quality_Worst' value="Worst"/><label for='Quality_Worst'>Worst</label>
+	<br/><br/>
+	<input type="checkbox" id='MetaData' name="MetaData"/><label for='Metadata'>Write Metadata</label>
+	<input type="checkbox" id='Subtitles' name="Subtitles" onClick='Call elemDis(me.form.elements("Subs"), Not me.checked)'/><label for='Subtitles'>Download Subtitles:</label>
+	<input type="text" name="Subs" value="all" title="Example (minus for exlude land. Langs separated by commas): all or all,-ja or ru,en"/>
+	<br/><br/>
+	<input type="button" value="Download Video" onClick='DownloadVideo'/>
+	<input type="button" value="Save MP3" onClick='DownloadAudio'/>
+	<br/><br/>
+	<img class="fl" src="./coffee.png" alt="PayPal - Buy Me a Coffee!" onClick='OpenUrl("http://bit.ly/2jpF4AZ")'/>
+	<input type="button" value="About..." onClick='About'/>
+	<input type="button" value="Update yt-dlp" onClick='UpdateYtDlp'/>
+	<input type="button" value="Donate via PayPal" onClick='OpenUrl("http://bit.ly/2meyx2s")'/>
+	<input type="button" value="Check Forum" onClick='OpenUrl("http://bit.ly/2IQJTU6")'/>
+</form>
+</body>
+</html>

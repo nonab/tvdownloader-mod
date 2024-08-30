@@ -1,0 +1,39 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD XHTML 1.1 Strict//EN"
+"http://www.w3.org/TR/xhtml11/DTD/xhtml11-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ru">
+<head>
+<meta http-equiv="Content-Type" content='text/html; charset="windows-1251"'/>
+<title>About...</title>
+<meta name="Author" content='Ciber SLasH'/>
+<script type="text/javascript">
+//<![CDATA[
+function KeyPress(e) {
+var evt = e || event;
+	if (evt.keyCode == 27) {	// если нажали <ESC>
+		window.close();
+	}
+}
+onload = function () {
+var args = window.dialogArguments.oHTA;
+	document.onkeypress = function () {
+		KeyPress(event);
+	}
+	document.getElementById('content').innerText = [
+		args.applicationName +" "+ args.version,
+		"Copyright " + args.copyright,
+		args.modString
+	].join('\r\n');
+}
+// ]]>
+</script>
+</head>
+
+<body>
+<center>
+<pre id='content'></pre>
+<a href="" onClick='window.dialogArguments.OpenUrl("http://bit.ly/2IQJTU6"); return false;'>Check for New Version</a>
+<br/><br/>
+<button onClick='window.close();'>Close</button>
+</center>
+</body>
+</html>
